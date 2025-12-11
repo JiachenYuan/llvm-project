@@ -665,7 +665,21 @@ static DiffVec &diffEncode(DiffVec &V, unsigned InitVal, Iter Begin, Iter End) {
 static void printDiff16(raw_ostream &OS, int16_t Val) { OS << Val; }
 
 static void printMask(raw_ostream &OS, LaneBitmask Val) {
-  OS << "LaneBitmask(0x" << PrintLaneMask(Val) << ')';
+  std::string S;
+  raw_string_ostream OStream(S);
+  OStream << PrintLaneMask(Val);
+  StringRef LaneMaskStr = OStream.str();
+
+  // If the string is longer than one word, use the explicit array constructor.
+  size_t LaneMaskStrSize = LaneMaskStr.size();
+  if (LaneMaskStrSize > 16) {
+    OS << "LaneBitmask(std::array<uint64_t, " << (Val.size() + 63) / 64 << ">{";
+    for (int Start = LaneMaskStrSize - 16; Start >= 16; Start -= 16)
+      OS << "0x" << LaneMaskStr.substr(Start, 16) << ", ";
+    OS << "0x" << LaneMaskStr.substr(0, 16) << "})";
+  } else {
+    OS << "LaneBitmask(0x" << LaneMaskStr << ')';
+  }
 }
 
 // Try to combine Idx's compose map into Vec if it is compatible.
@@ -875,13 +889,11 @@ void RegisterInfoEmitter::emitComposeSubRegIndexLaneMask(raw_ostream &OS,
         "  for (const MaskRolOp *Ops =\n"
         "       &LaneMaskComposeSequences[CompositeSequences[IdxA]];\n"
         "       Ops->Mask.any(); ++Ops) {\n"
-        "    LaneBitmask::Type M = LaneMask.getAsInteger() & "
-        "Ops->Mask.getAsInteger();\n"
+        "    LaneBitmask M = LaneMask & Ops->Mask;\n"
         "    if (unsigned S = Ops->RotateLeft)\n"
-        "      Result |= LaneBitmask((M << S) | (M >> (LaneBitmask::BitWidth - "
-        "S)));\n"
+        "      Result |= M.rotateLeft(S);\n"
         "    else\n"
-        "      Result |= LaneBitmask(M);\n"
+        "      Result |= M;\n"
         "  }\n"
         "  return Result;\n"
         "}\n\n";
@@ -897,12 +909,10 @@ void RegisterInfoEmitter::emitComposeSubRegIndexLaneMask(raw_ostream &OS,
         "  for (const MaskRolOp *Ops =\n"
         "       &LaneMaskComposeSequences[CompositeSequences[IdxA]];\n"
         "       Ops->Mask.any(); ++Ops) {\n"
-        "    LaneBitmask::Type M = LaneMask.getAsInteger();\n"
         "    if (unsigned S = Ops->RotateLeft)\n"
-        "      Result |= LaneBitmask((M >> S) | (M << (LaneBitmask::BitWidth - "
-        "S)));\n"
+        "      Result |= LaneMask.rotateRight(S);\n"
         "    else\n"
-        "      Result |= LaneBitmask(M);\n"
+        "      Result |= LaneMask;\n"
         "  }\n"
         "  return Result;\n"
         "}\n\n";
